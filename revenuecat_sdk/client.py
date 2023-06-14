@@ -20,14 +20,16 @@ class BlockAll(CookiePolicy):
 
 class Client:
     base_api_url = "https://api.revenuecat.com/v1"
+    base_v2_api_url = "https://api.revenuecat.com/v2"
 
-    def __init__(self, public_key: str = None, secret_key: str = None):
+    def __init__(self, public_key: str = None, secret_key: str = None, v2_secret_key: str = None):
         if public_key is None and secret_key is None:
             raise Exception("Either public key or secret key must be set")
 
         self.session = self.create_session()
         self.public_key = public_key
         self.secret_key = secret_key
+        self.v2_secret_key = v2_secret_key
 
     def create_session(self):
         session = requests.Session()
@@ -42,8 +44,9 @@ class Client:
         return session
 
     def make_request(
-        self, method, path, payload=None, platform=None, key=None, timeout=5
+        self, method, path, payload=None, platform=None, key=None, timeout=5, api_version="v1"
     ) -> JSONType:
+        base_url = self.base_api_url if api_version == "v1" else self.base_v2_api_url
         url = self.base_api_url + encode(path)
         data = json.dumps(payload) if payload is not None else None
         headers = {}
