@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Union
 
 import requests
 
-from .enums import AttributionSource, PaymentMode, Platform, PromotionDuration
+from .enums import AttributionSource, PaymentMode, Platform, PromotionDuration, ApiKey, ApiVersion
 from .errors import RevenueCatError, Unavailable
 from .response import Offering, Offerings, Package, Subscriber, SubscriberAttribute
 from .utils import encode, to_timestamp
@@ -44,23 +44,27 @@ class Client:
         return session
 
     def make_request(
-        self, method, path, payload=None, platform=None, key=None, timeout=5, api_version="v1"
+        self, method, path, payload=None, platform=None, key: ApiKey = ApiKey.PUBLIC, timeout=5, api_version=ApiVersion.V1
     ) -> JSONType:
-        base_url = self.base_api_url if api_version == "v1" else self.base_v2_api_url
-        url = self.base_api_url + encode(path)
+        if not isinstance(key, ApiKey):
+            raise ValueError("`key` must be a member of ApiKey enum.")
+        if not isinstance(api_version, ApiVersion):
+            raise ValueError("`key` must be a member of ApiVersion enum.")
+        base_url = self.base_api_url if api_version == ApiVersion.V1 else self.base_v2_api_url
+        url = base_url + encode(path)
         data = json.dumps(payload) if payload is not None else None
         headers = {}
 
         if platform is not None:
             headers.update({"X-Platform": platform})
 
-        if key is not None:
-            token = self.public_key if key == "public" else self.secret_key
+        token = self.public_key if key == ApiKey.PUBLIC else (
+            self.secret_key if api_version == ApiVersion.V1 else self.v2_secret_key
+        )
+        if token is None:
+            raise Exception(f"This functionality requires {key.name} key to be set")
 
-            if token is None:
-                raise Exception(f"This functionality requires {key} key to be set")
-
-            headers.update({"Authorization": f"Bearer {token}"})
+        headers.update({"Authorization": f"Bearer {token}"})
 
         try:
             response = self.session.request(
@@ -96,7 +100,7 @@ class Client:
 
     def get_subscriber_info(self, app_user_id: str) -> Subscriber:
         path = f"/subscribers/{app_user_id}"
-        key = "secret" if self.secret_key else "public"
+        key = ApiKey.SECRET if self.secret_key else ApiKey.PUBLIC
 
         data = self.make_request("GET", path, key=key)
 
@@ -121,14 +125,14 @@ class Client:
         path = f"/subscribers/{app_user_id}/attributes"
         payload = {"attributes": attrs}
 
-        self.make_request("POST", path, payload, key="public")  # check key
+        self.make_request("POST", path, payload, key=ApiKey.PUBLIC)  # check key
 
         return None
 
     def delete_subscriber(self, app_user_id: str) -> str:
         path = f"/subscribers/{app_user_id}"
 
-        data = self.make_request("DELETE", path, key="secret")
+        data = self.make_request("DELETE", path, key=ApiKey.SECRET)
 
         return data["app_user_id"]
 
@@ -161,7 +165,7 @@ class Client:
         }
 
         data = self.make_request(
-            "POST", path, payload=payload, platform=platform, key="public"
+            "POST", path, payload=payload, platform=platform, key=ApiKey.PUBLIC
         )
 
         return self.generate_subscriber_response(data)
@@ -179,7 +183,7 @@ class Client:
         start_time_ms = to_timestamp(start_time)
         payload = {"duration": duration, "start_time_ms": start_time_ms}
 
-        data = self.make_request("POST", path, payload=payload, key="secret")
+        data = self.make_request("POST", path, payload=payload, key=ApiKey.SECRET)
 
         return self.generate_subscriber_response(data)
 
@@ -190,7 +194,7 @@ class Client:
         /subscribers/{app_user_id}/entitlements/{entitlement_identifier}/revoke_promotionals
         """
 
-        data = self.make_request("POST", path, key="secret")
+        data = self.make_request("POST", path, key=ApiKey.SECRET)
 
         return self.generate_subscriber_response(data)
 
@@ -199,7 +203,7 @@ class Client:
     ) -> Subscriber:
         path = f"/subscribers/{app_user_id}/subscriptions/{product_identifier}/revoke"
 
-        data = self.make_request("POST", path, key="secret")
+        data = self.make_request("POST", path, key=ApiKey.SECRET)
 
         return self.generate_subscriber_response(data)
 
@@ -210,7 +214,7 @@ class Client:
         expiry_time_ms = to_timestamp(expiry_time)
         payload = {"expiry_time_ms": expiry_time_ms}
 
-        data = self.make_request("POST", path, payload, key="secret")
+        data = self.make_request("POST", path, payload, key=ApiKey.SECRET)
 
         return self.generate_subscriber_response(data)
 
@@ -220,7 +224,7 @@ class Client:
         # store_transaction_identifier
         path = f"/subscribers/{app_user_id}/subscriptions/{product_identifier}/refund"
 
-        data = self.make_request("POST", path, key="secret")
+        data = self.make_request("POST", path, key=ApiKey.SECRET)
 
         return self.generate_subscriber_response(data)
 
@@ -233,14 +237,14 @@ class Client:
     ) -> None:
         path = f"subscribers/{app_user_id}/attribution"
 
-        self.make_request("POST", path, key="public")  # check key
+        self.make_request("POST", path, key=ApiKey.PUBLIC)  # check key
 
         return None
 
     def get_offerings(self, app_user_id: str, platform: Platform) -> Offerings:
         path = f"subscribers/{app_user_id}/offerings"
 
-        data = self.make_request("GET", path, platform=platform, key="public")
+        data = self.make_request("GET", path, platform=platform, key=ApiKey.PUBLIC)
 
         return self.get_offerings_response(data)
 
@@ -249,13 +253,28 @@ class Client:
     ) -> Subscriber:
         path = f"/subscribers/{app_user_id}/offerings/{offering_uuid}/override"
 
-        data = self.make_request("POST", path, key="secret")
+        data = self.make_request("POST", path, key=ApiKey.SECRET)
 
         return self.generate_subscriber_response(data)
 
     def delete_current_offering_override(self, app_user_id: str) -> Subscriber:
         path = f"/subscribers/{app_user_id}/offerings/override"
 
-        data = self.make_request("DELETE", path, key="secret")
+        data = self.make_request("DELETE", path, key=ApiKey.SECRET)
 
         return self.generate_subscriber_response(data)
+
+    def get_projects(self) -> dict:
+        path = f"/projects"
+
+        data = self.make_request("GET", path, key=ApiKey.SECRET, api_version=ApiVersion.V2)
+
+        return data
+    
+    def get_products(self, project_id: str) -> dict:
+        path = f"/projects/{project_id}/products"
+
+        data = self.make_request("GET", path, key=ApiKey.SECRET, api_version=ApiVersion.V2)
+
+        return data
+

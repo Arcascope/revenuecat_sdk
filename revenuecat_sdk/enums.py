@@ -51,3 +51,13 @@ class Store(Enum):
 class OwnershipType(Enum):
     PURCHASED = "PURCHASED"
     FAMILY_SHARED = "FAMILY_SHARED"
+
+
+class ApiVersion(Enum):
+    V1 = "v1"
+    V2 = "v2"
+
+
+class ApiKey(Enum):
+    PUBLIC = "public"
+    SECRET = "secret"
